@@ -1,5 +1,9 @@
 # Token Launch Radar
 
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/gaiaoagoaia-art/radar-entry/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/gaiaoagoaia-art/radar-entry/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+
 An entry for the make.fun bounty [token-radar-01](https://make.fun/bounty/token-radar-01): a radar that ranks protocols with no token yet by what a token would be worth, and shows how to farm each one.
 
 ## The model — comparables, not a flat guess
