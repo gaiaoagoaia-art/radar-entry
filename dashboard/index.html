@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Launch Radar — pre-token protocols ranked by comparables</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="masthead">
+  <div class="masthead-in">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div>
+        <h1>Token Launch Radar</h1>
+        <p class="tagline">Protocols with no token yet, ranked by what a token would be worth — priced off the protocols that already have one.</p>
+      </div>
+    </div>
+    <dl class="stats" id="stats"></dl>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="model-panel" aria-label="How the ranking works">
+    <div class="panel-head">
+      <h2>How a row earns its value</h2>
+      <span class="model-tag" id="model-tag"></span>
+    </div>
+    <p class="formula" id="formula"></p>
+    <div class="factors">
+      <article>
+        <h3>1 · Comparables</h3>
+        <p>Tokenized protocols reveal what the market pays per $1 of TVL, and it is not one price: in this snapshot the median is <strong id="fact-comp"></strong>. Each category with at least three tokenized peers lends its own median; thin categories use the market-wide median.</p>
+      </article>
+      <article>
+        <h3>2 · Momentum</h3>
+        <p>The 7-day TVL change, clamped to −40%…+80%, scales value by <strong>0.76×–1.48×</strong>. Growing protocols are gaining the users a token would be sold to; shrinking ones are losing them.</p>
+      </article>
+      <article>
+        <h3>3 · Longevity</h3>
+        <p>Age scales value by <strong>0.75×–1.25×</strong> over four years. A protocol that has run for years with no token has survived the audits, bear markets and exploits that killed younger rivals.</p>
+      </article>
+    </div>
+    <div class="comps-wrap">
+      <h3>The comparables, from this snapshot's tokenized protocols</h3>
+      <table class="comps" id="comps"></table>
+    </div>
+    <p class="fineprint">An implied value is this model's claim about a hypothetical token, not a prediction that a token will exist. Nothing here is financial advice; farm sizes in the plans are illustrations, and every protocol carries smart-contract risk.</p>
+  </section>
+
+  <section class="panel" id="board-panel" aria-label="The ranked board">
+    <div class="panel-head">
+      <h2 id="board-title">The board</h2>
+      <span class="count" id="board-count"></span>
+    </div>
+    <div class="controls">
+      <label class="search">Search
+        <input id="q" type="search" placeholder="Protocol, category or chain…" autocomplete="off">
+      </label>
+      <label>Category
+        <select id="f-category"></select>
+      </label>
+      <label>Chain
+        <select id="f-chain"></select>
+      </label>
+      <label>Sort by
+        <select id="f-sort">
+          <option value="rank">Model rank</option>
+          <option value="implied">Implied value</option>
+          <option value="tvl">TVL</option>
+          <option value="change">7-day change</option>
+          <option value="age">Age</option>
+        </select>
+      </label>
+      <div class="segments" role="group" aria-label="Which rows to show">
+        <button type="button" data-seg="all" class="on">All pre-token</button>
+        <button type="button" data-seg="watchlist">Watchlist</button>
+        <button type="button" data-seg="early">Early finds</button>
+        <button type="button" data-seg="live">Live comparables</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="board" id="board"></table>
+    </div>
+    <p class="hint">Select any row for its full record: the model's arithmetic for that protocol and its step-by-step farm plan.</p>
+  </section>
+
+  <section class="panel detail" id="detail" hidden aria-label="Protocol detail"></section>
+</main>
+
+<footer>
+  <p id="foot-note"></p>
+</footer>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
