@@ -52,18 +52,23 @@
     '<div><dt>Watchlist covered</dt><dd>' + DATA.watchlist_size + ' / ' + DATA.watchlist_size + '</dd></div>' +
     '<div><dt>Board implied value</dt><dd>' + money(totalImplied) + '</dd></div>';
   el('model-tag').textContent = 'model ' + DATA.model_version + ' · market median ' + mult(DATA.global_multiple);
-  el('formula').textContent = 'implied value  =  TVL  ×  category multiple (median of tokenized peers)  ×  momentum factor  ×  longevity factor';
+  el('formula').textContent = 'implied value  =  TVL  ×  peer multiple (category median, else family median, else market median)  ×  momentum factor  ×  longevity factor';
   if (DATA.comps.length > 1) {
     var hi = DATA.comps[0];
     var lo = DATA.comps[DATA.comps.length - 1];
     el('fact-comp').textContent = lo.median_multiple.toFixed(2) + '× for ' + lo.category.toLowerCase() + ' to ' + hi.median_multiple.toFixed(2) + '× for ' + hi.category.toLowerCase();
   }
-  var compsHtml = '<thead><tr><th>Category</th><th class="num">Tokenized peers</th><th class="num">Median market cap / TVL</th></tr></thead><tbody>';
-  DATA.comps.forEach(function (c) {
-    compsHtml += '<tr><td>' + esc(c.category) + '</td><td class="num">' + c.peers + '</td><td class="num">' + mult(c.median_multiple) + '</td></tr>';
-  });
-  compsHtml += '</tbody>';
-  el('comps').innerHTML = compsHtml;
+  function compsTable(groups) {
+    var html = '<thead><tr><th>Group</th><th class="num">Tokenized peers</th><th class="num">Median mcap / TVL</th><th class="num">Middle half (Q1–Q3)</th><th>Largest peers behind it</th></tr></thead><tbody>';
+    groups.forEach(function (c) {
+      var top = c.peer_list.slice(0, 3).map(function (p) { return esc(p.name) + ' ' + mult(p.multiple); }).join(' · ');
+      html += '<tr><td>' + esc(c.category) + '</td><td class="num">' + c.peers + '</td><td class="num">' + mult(c.median_multiple) + '</td>' +
+        '<td class="num">' + mult(c.q1_multiple) + ' – ' + mult(c.q3_multiple) + '</td><td class="peers">' + top + '</td></tr>';
+    });
+    return html + '</tbody>';
+  }
+  el('comps').innerHTML = compsTable(DATA.comps);
+  el('families').innerHTML = compsTable(DATA.families);
   el('foot-note').textContent = 'Snapshot: ' + DATA.source + ' · Radar model ' + DATA.model_version + ' · Implied values are the model\u2019s claims about hypothetical tokens, not predictions or advice.';
 
   /* ---------- filters ---------- */
@@ -96,12 +101,14 @@
           r.chains.some(function (c) { return c.toLowerCase().indexOf(q) >= 0; });
       });
     }
+    var confScore = { high: 0, medium: 1, low: 2 };
     var by = {
       rank: function (a, b) { return a.rank - b.rank; },
       implied: function (a, b) { return b.implied_value_usd - a.implied_value_usd; },
       tvl: function (a, b) { return b.tvl_usd - a.tvl_usd; },
       change: function (a, b) { return (b.change_7d == null ? -1e9 : b.change_7d) - (a.change_7d == null ? -1e9 : a.change_7d); },
-      age: function (a, b) { return (b.age_days == null ? -1 : b.age_days) - (a.age_days == null ? -1 : a.age_days); }
+      age: function (a, b) { return (b.age_days == null ? -1 : b.age_days) - (a.age_days == null ? -1 : a.age_days); },
+      confidence: function (a, b) { return (confScore[a.confidence] - confScore[b.confidence]) || (b.implied_value_usd - a.implied_value_usd); }
     };
     rows.sort(by[state.sort] || by.rank);
     return rows;
@@ -119,7 +126,9 @@
         '<td class="num">' + money(r.tvl_usd) + '</td>' +
         '<td class="num">' + pct(r.change_7d) + '</td>' +
         '<td class="num">' + ageText(r.age_days) + '</td>' +
-        '<td class="num implied">' + money(r.implied_value_usd) + '</td></tr>';
+        '<td class="num implied">' + money(r.implied_value_usd) +
+        '<span class="range">' + money(r.implied_low_usd) + ' – ' + money(r.implied_high_usd) + '</span>' +
+        '<span class="conf conf-' + r.confidence + '" title="' + r.confidence + ' confidence — ' + r.comp_peers + ' peers, ' + esc(r.multiple_group) + '">● ' + r.confidence + '</span></td></tr>';
     });
     return html + '</tbody>';
   }
@@ -168,6 +177,11 @@
   }
 
   /* ---------- detail view ---------- */
+  function peerGroup(r) {
+    var pool = r.multiple_source === 'family' ? DATA.families : DATA.comps;
+    for (var i = 0; i < pool.length; i++) if (pool[i].category === r.multiple_group) return pool[i];
+    return null;
+  }
   function renderDetail(slug) {
     var r = null;
     DATA.rows.forEach(function (row) { if (row.slug === slug) r = row; });
@@ -175,9 +189,33 @@
     if (!r) { node.innerHTML = '<p class="empty">That protocol is not on the board.</p>'; return; }
     var base = r.tvl_usd * r.category_multiple;
     var steps = r.farm_steps.map(function (s) { return '<li><div>' + esc(s) + '</div></li>'; }).join('');
+    var srcText = r.multiple_source === 'category'
+      ? 'the median of ' + r.comp_peers + ' tokenized ' + esc(r.category || '') + ' peers'
+      : r.multiple_source === 'family'
+        ? 'the median of ' + r.comp_peers + ' tokenized peers in its family, ' + esc(r.multiple_group) + ' — its own category has too few tokenized peers to read'
+        : 'the market-wide median of ' + r.comp_peers + ' tokenized protocols — neither its category nor a family has three tokenized peers to read';
+    var group = peerGroup(r);
+    var peersHtml = '';
+    if (group) {
+      var shown = group.peer_list.slice(0, 10).map(function (p) {
+        return '<li>' + esc(p.name) + (p.symbol ? ' (' + esc(p.symbol) + ')' : '') + ' — the market pays ' + mult(p.multiple) + ' of TVL</li>';
+      }).join('');
+      peersHtml = '<h3 style="margin-top:20px">The peers behind the multiple</h3><ul class="peerlist">' + shown + '</ul>' +
+        (group.peer_list.length > 10 ? '<p class="fineprint">The ' + (group.peer_list.length - 10) + ' smaller peers are in the dataset; the median and quartiles are computed over all ' + group.peers + '.</p>' : '');
+    }
+    // The range bar: low and high placed on a log scale between half the low and twice the high.
+    var lo = Math.log(r.implied_low_usd * 0.5);
+    var hi = Math.log(r.implied_high_usd * 2);
+    var pos = function (v) { return Math.max(0, Math.min(100, (Math.log(v) - lo) / (hi - lo) * 100)); };
+    var barHtml = '<div class="rangebar" role="img" aria-label="Value range ' + money(r.implied_low_usd) + ' to ' + money(r.implied_high_usd) + '">' +
+      '<div class="rb-track"></div><div class="rb-span" style="left:' + pos(r.implied_low_usd) + '%;width:' + Math.max(1, pos(r.implied_high_usd) - pos(r.implied_low_usd)) + '%"></div>' +
+      '<div class="rb-point" style="left:' + pos(r.implied_value_usd) + '%"></div>' +
+      '<span class="rb-lo" style="left:' + pos(r.implied_low_usd) + '%">' + money(r.implied_low_usd) + '</span>' +
+      '<span class="rb-hi" style="left:' + pos(r.implied_high_usd) + '%">' + money(r.implied_high_usd) + '</span></div>';
     node.innerHTML =
       '<div class="detail-head"><h2>' + esc(r.name) + (r.watchlist ? '<span class="watch">◆ watchlist</span>' : '') + '</h2>' +
       '<button type="button" class="back" id="back-btn">← Back to the board</button></div>' +
+      '<p class="thesis">' + esc(r.thesis) + '</p>' +
       '<div class="detail-grid"><div>' +
       '<h3>The record</h3><dl>' +
       '<dt>Model rank</dt><dd>#' + r.rank + ' of ' + DATA.board_size + '</dd>' +
@@ -187,14 +225,17 @@
       '<dt>TVL change, 7 days</dt><dd>' + (r.change_7d == null ? 'not reported' : (r.change_7d > 0 ? '+' : '') + r.change_7d.toFixed(2) + '%') + '</dd>' +
       '<dt>Tracked since</dt><dd>' + esc(r.listed_at || 'unknown') + ' (' + ageText(r.age_days) + ')</dd>' +
       '<dt>Token today</dt><dd>none recorded — pre-token</dd>' +
+      '<dt>If it traded today</dt><dd>rank #' + r.live_rank + ' of ' + DATA.live_total + ' by market cap</dd>' +
       '</dl></div><div>' +
       '<h3>How the model prices it</h3><div class="arith">' +
       'TVL ' + moneyFull(r.tvl_usd) + '<br>' +
-      '× category multiple ' + mult(r.category_multiple) + (r.comp_peers > 0 ? ' (median of ' + r.comp_peers + ' tokenized ' + esc(r.category || '') + ' peers)' : ' (market-wide median; too few tokenized peers in this category)') + ' = ' + moneyFull(base) + '<br>' +
+      '× peer multiple ' + mult(r.category_multiple) + ' (' + srcText + ') = ' + moneyFull(base) + '<br>' +
       '× momentum ' + r.momentum_factor.toFixed(2) + '× · longevity ' + r.longevity_factor.toFixed(2) + '×<br>' +
       '<span class="res">= implied value ' + moneyFull(r.implied_value_usd) + '</span></div>' +
-      '<p class="fineprint">If ' + esc(r.name) + ' issued a token the market priced like its tokenized peers, adjusted for its current momentum and its track record, this is the market cap the model would expect. It says nothing about whether or when a token comes.</p>' +
-      '</div></div>' +
+      '<p class="conf-line">Confidence: <span class="conf conf-' + r.confidence + '">● ' + r.confidence + '</span> — from ' + r.comp_peers + ' peers and the width of their middle half.</p>' +
+      '<h4 class="range-head">The range the peers imply</h4>' + barHtml +
+      '<p class="fineprint">The point estimate uses the peers\u2019 median multiple; the range uses their first and third quartiles with the same momentum and longevity factors. If ' + esc(r.name) + ' issued a token the market priced like those peers, this is the band the model would expect. It says nothing about whether or when a token comes.</p>' +
+      '</div></div>' + peersHtml +
       '<h3 style="margin-top:20px">The farm plan — ' + r.farm_steps.length + ' steps</h3>' +
       '<ol class="steps">' + steps + '</ol>';
     el('back-btn').addEventListener('click', function () { location.hash = '#/board'; });

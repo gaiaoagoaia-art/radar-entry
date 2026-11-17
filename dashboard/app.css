@@ -59,7 +59,7 @@ h3 { font-size: 14px; margin: 0 0 6px; }
   background: #0a0f0b; border: 1px solid var(--line-soft); border-left: 3px solid var(--phosphor);
   border-radius: 8px; padding: 12px 14px; margin: 14px 0 16px; overflow-x: auto; white-space: nowrap;
 }
-.factors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.factors { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .factors article { background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line-soft); border-radius: 10px; padding: 13px 15px; }
 .factors h3 { color: var(--phosphor); }
 .factors p { margin: 0; color: var(--muted); font-size: 13.5px; }
@@ -70,6 +70,8 @@ table { border-collapse: collapse; width: 100%; }
 .comps th, .comps td { text-align: left; padding: 5px 10px 5px 0; font-size: 13px; border-bottom: 1px solid var(--line-soft); }
 .comps th { color: var(--faint); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; }
 .comps td.num, .comps th.num { text-align: right; font-family: var(--mono); }
+.comps td.peers { color: var(--muted); font-size: 12.5px; }
+.families-head { margin-top: 20px; }
 .fineprint { color: var(--faint); font-size: 12.5px; margin: 14px 0 0; }
 .controls { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; margin: 16px 0 6px; }
 .controls label { display: grid; gap: 5px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); font-weight: 600; }
@@ -105,6 +107,11 @@ input[type="search"]:focus, select:focus { outline: 2px solid rgba(74, 222, 128,
 .down { color: var(--red); }
 .flat { color: var(--muted); }
 .implied { color: var(--ink); font-weight: 650; }
+.implied .range { display: block; font-weight: 400; font-size: 11.5px; color: var(--faint); }
+.implied .conf { display: block; font-weight: 600; font-size: 11px; letter-spacing: 0.04em; }
+.conf-high { color: var(--phosphor); }
+.conf-medium { color: var(--amber); }
+.conf-low { color: var(--red); }
 .hint { color: var(--faint); font-size: 12.5px; margin: 10px 0 0; }
 .detail { border-color: rgba(74, 222, 128, 0.35); }
 .detail .back { background: none; border: 1px solid var(--line); color: var(--phosphor); border-radius: 8px; padding: 7px 12px; font: 600 13px var(--sans); cursor: pointer; }
@@ -116,6 +123,17 @@ input[type="search"]:focus, select:focus { outline: 2px solid rgba(74, 222, 128,
 .detail dd { margin: 0; font-family: var(--mono); text-align: right; }
 .arith { font-family: var(--mono); font-size: 13.5px; background: #0a0f0b; border: 1px solid var(--line-soft); border-radius: 8px; padding: 12px 14px; line-height: 1.9; overflow-x: auto; }
 .arith .res { color: var(--phosphor); font-weight: 700; }
+.thesis { margin: 12px 0 0; font-size: 15.5px; line-height: 1.55; color: var(--ink); border-left: 3px solid var(--amber); padding: 4px 0 4px 14px; max-width: 78ch; }
+.conf-line { font-size: 13.5px; color: var(--muted); margin: 12px 0 0; }
+.conf-line .conf { font-weight: 700; }
+.range-head { margin: 16px 0 4px; font-size: 13px; color: var(--ink); }
+.rangebar { position: relative; height: 44px; margin: 10px 4px 0; }
+.rb-track { position: absolute; left: 0; right: 0; top: 12px; height: 6px; border-radius: 3px; background: var(--line-soft); }
+.rb-span { position: absolute; top: 12px; height: 6px; border-radius: 3px; background: rgba(74, 222, 128, 0.4); }
+.rb-point { position: absolute; top: 7px; width: 3px; height: 16px; margin-left: -1px; background: var(--phosphor); border-radius: 2px; }
+.rb-lo, .rb-hi { position: absolute; top: 26px; transform: translateX(-50%); font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.peerlist { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; display: grid; gap: 3px; }
+.peerlist li::marker { color: var(--faint); }
 .steps { margin: 8px 0 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 10px; }
 .steps li { counter-increment: step; display: grid; grid-template-columns: 30px 1fr; gap: 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line-soft); border-radius: 10px; padding: 11px 14px; font-size: 14px; }
 .steps li::before {
@@ -124,6 +142,9 @@ input[type="search"]:focus, select:focus { outline: 2px solid rgba(74, 222, 128,
 }
 .empty { color: var(--muted); padding: 26px 6px; text-align: center; }
 footer { max-width: 1180px; margin: 0 auto; padding: 4px 22px 30px; color: var(--faint); font-size: 12.5px; }
+@media (max-width: 1080px) {
+  .factors { grid-template-columns: repeat(2, 1fr); }
+}
 @media (max-width: 860px) {
   .factors, .detail-grid { grid-template-columns: 1fr; }
   .stats { gap: 16px; }

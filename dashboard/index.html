@@ -29,21 +29,27 @@
     <p class="formula" id="formula"></p>
     <div class="factors">
       <article>
-        <h3>1 · Comparables</h3>
-        <p>Tokenized protocols reveal what the market pays per $1 of TVL, and it is not one price: in this snapshot the median is <strong id="fact-comp"></strong>. Each category with at least three tokenized peers lends its own median; thin categories use the market-wide median.</p>
+        <h3>1 · Comparables, in three steps</h3>
+        <p>Tokenized protocols reveal what the market pays per $1 of TVL, and it is not one price: in this snapshot the median runs <strong id="fact-comp"></strong>. A row is priced by its own category's median when that category has three or more tokenized peers; by its category <em>family's</em> median when the category is thin but the family — categories running the same business — is not; and only then by the market-wide median. Every multiple names the peers behind it, below.</p>
       </article>
       <article>
-        <h3>2 · Momentum</h3>
+        <h3>2 · A range, graded</h3>
+        <p>Each row carries the range its peers' middle half implies — first to third quartile — and a confidence grade from the peer count and their spread. Medians and quartiles, never averages: one tokenized peer in this snapshot trades at 400× its TVL, and an average would let it price a category.</p>
+      </article>
+      <article>
+        <h3>3 · Momentum</h3>
         <p>The 7-day TVL change, clamped to −40%…+80%, scales value by <strong>0.76×–1.48×</strong>. Growing protocols are gaining the users a token would be sold to; shrinking ones are losing them.</p>
       </article>
       <article>
-        <h3>3 · Longevity</h3>
+        <h3>4 · Longevity</h3>
         <p>Age scales value by <strong>0.75×–1.25×</strong> over four years. A protocol that has run for years with no token has survived the audits, bear markets and exploits that killed younger rivals.</p>
       </article>
     </div>
     <div class="comps-wrap">
       <h3>The comparables, from this snapshot's tokenized protocols</h3>
       <table class="comps" id="comps"></table>
+      <h3 class="families-head">Category families — pooled peers for thin categories</h3>
+      <table class="comps" id="families"></table>
     </div>
     <p class="fineprint">An implied value is this model's claim about a hypothetical token, not a prediction that a token will exist. Nothing here is financial advice; farm sizes in the plans are illustrations, and every protocol carries smart-contract risk.</p>
   </section>
@@ -70,6 +76,7 @@
           <option value="tvl">TVL</option>
           <option value="change">7-day change</option>
           <option value="age">Age</option>
+          <option value="confidence">Confidence</option>
         </select>
       </label>
       <div class="segments" role="group" aria-label="Which rows to show">
@@ -82,7 +89,7 @@
     <div class="table-wrap">
       <table class="board" id="board"></table>
     </div>
-    <p class="hint">Select any row for its full record: the model's arithmetic for that protocol and its step-by-step farm plan.</p>
+    <p class="hint">Each row shows the point estimate, the range its peers' middle half implies, and a confidence grade. Select any row for its full record: the model's arithmetic, the peers behind its multiple, and its step-by-step farm plan.</p>
   </section>
 
   <section class="panel detail" id="detail" hidden aria-label="Protocol detail"></section>

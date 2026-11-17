@@ -5,21 +5,33 @@
 //
 //   1. COMPARABLES. Protocols that already have a token reveal what the market pays per dollar of
 //      TVL, and the price differs sharply by category: in this snapshot the median market-cap/TVL
-//      multiple is about 0.04x for liquid staking and about 1.2x for cross-chain bridges. For each
-//      category with at least three tokenized protocols, the model takes that category's median
-//      multiple; thin categories fall back to the market-wide median. A pre-token protocol's base
-//      value is its TVL times its category's multiple — the value of a typical tokenized peer.
-//   2. MOMENTUM. A protocol whose TVL grew over the last seven days is gaining users faster than
+//      multiple is about 0.04x for liquid staking and about 1.2x for cross-chain bridges. The
+//      multiple a protocol is priced with comes from a three-step hierarchy, and every step names
+//      the peers behind it:
+//        a. its own category's median, when the category has at least three tokenized peers;
+//        b. its category FAMILY's median, when the category is thin but its family — the set of
+//           categories running the same business (vault curators and allocators; the staking
+//           family; the derivatives family; see FAMILIES below) — has at least three;
+//        c. the market-wide median, only when neither the category nor its family can be read.
+//      Medians and quartiles, never means: one 400x prediction-market token or one 69x exchange
+//      would poison an average, and this snapshot has both. A pre-token protocol's base value is
+//      its TVL times the resolved multiple — the value of a typical tokenized peer.
+//   2. A RANGE, NOT JUST A POINT. The peers' middle half (their first-to-third quartile
+//      multiples) becomes the row's value range: low = TVL x Q1, high = TVL x Q3, with the same
+//      momentum and longevity factors applied. Each row also carries a confidence grade from the
+//      peer count and the spread: many peers agreeing tightly is high confidence; few peers
+//      spread widely is low, and the dashboard says so on the row.
+//   3. MOMENTUM. A protocol whose TVL grew over the last seven days is gaining users faster than
 //      its peers; one that is shrinking is losing them. The base is scaled by the 7-day change,
 //      clamped so one wild week cannot dominate: -40%..+80% maps to a 0.76x..1.48x factor.
-//   3. LONGEVITY. A protocol that has run for years without a token has survived audits, bear
+//   4. LONGEVITY. A protocol that has run for years without a token has survived audits, bear
 //      markets and exploits that killed younger rivals. Age scales the base from 0.75x (brand new)
 //      to 1.25x (four years or more), linearly.
 //
-//   implied_value = TVL x category_multiple x momentum_factor x longevity_factor
+//   implied_value = TVL x peer_multiple x momentum_factor x longevity_factor
 //
 // No protocol name is ever special-cased: the same function scores every row, and the dashboard
-// shows every input and factor for every row, so a reader can check the arithmetic.
+// shows every input, factor, peer and quartile for every row, so a reader can check the arithmetic.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -44,12 +56,32 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-/** One category's comparables evidence: how many tokenized peers, and their median multiple. */
+/** One tokenized peer behind a multiple: its name, its symbol, and what the market pays for it. */
+export interface CompPeer {
+  name: string;
+  symbol: string | null;
+  multiple: number;
+  mcap_usd: number;
+}
+
+/**
+ * One comparables group's evidence: a category's own peers, or a family of categories pooled.
+ * The quartiles are the peers' multiples' middle half — the spread the value range comes from.
+ */
 export interface CompGroup {
   category: string;
   peers: number;
   median_multiple: number;
+  q1_multiple: number;
+  q3_multiple: number;
+  peer_list: CompPeer[];
 }
+
+/** Where a row's multiple came from: its own category, its category family, or the whole market. */
+export type MultipleSource = 'category' | 'family' | 'market';
+
+/** How much to trust a row's multiple: peer count and spread, graded. */
+export type Confidence = 'high' | 'medium' | 'low';
 
 /** The model's constants, stated in the dashboard so a reader can re-run the arithmetic. */
 export interface ModelConstants {
@@ -74,7 +106,7 @@ export const MODEL: ModelConstants = {
   unknown_age_days: 365,
 };
 
-export const MODEL_VERSION = 'comps-1';
+export const MODEL_VERSION = 'comps-2';
 
 /** How many live-token protocols the comparables view carries, by market cap. */
 export const LIVE_ROWS = 30;
@@ -103,9 +135,19 @@ export interface BoardRow {
   watchlist: boolean;
   age_days: number | null;
   implied_value_usd: number;
+  /** The value range from the peer set's middle half, and where the implied value would rank live. */
+  implied_low_usd: number;
+  implied_high_usd: number;
+  live_rank: number;
+  thesis: string;
   model: {
     category_multiple: number;
     comp_peers: number;
+    multiple_source: MultipleSource;
+    multiple_group: string;
+    q1_multiple: number;
+    q3_multiple: number;
+    confidence: Confidence;
     momentum_pct: number;
     momentum_factor: number;
     longevity_factor: number;
@@ -127,8 +169,15 @@ export interface RadarRow {
   age_days: number | null;
   watchlist: boolean;
   implied_value_usd: number;
+  implied_low_usd: number;
+  implied_high_usd: number;
+  live_rank: number;
+  thesis: string;
   category_multiple: number;
   comp_peers: number;
+  multiple_source: MultipleSource;
+  multiple_group: string;
+  confidence: Confidence;
   momentum_factor: number;
   longevity_factor: number;
   farm_steps: string[];
@@ -155,7 +204,11 @@ export interface RadarData {
   model: ModelConstants;
   model_version: string;
   global_multiple: number;
+  global_q1: number;
+  global_q3: number;
+  live_total: number;
   comps: CompGroup[];
+  families: CompGroup[];
   universe_size: number;
   watchlist_size: number;
   board_size: number;
@@ -185,6 +238,70 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/** A quartile of a non-empty list: the median of its lower (q=0.25) or upper (q=0.75) half. */
+function quartile(values: number[], q: 0.25 | 0.75): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const half = sorted.length % 2 === 1 ? (q === 0.25 ? sorted.slice(0, mid) : sorted.slice(mid + 1)) : (q === 0.25 ? sorted.slice(0, mid) : sorted.slice(mid));
+  return half.length > 0 ? median(half) : sorted[mid]!;
+}
+
+/**
+ * Category families: categories that run the same business, pooled when one of them is too thin
+ * to read on its own. A curator's vault, an onchain allocator and a yield aggregator all earn fees
+ * on capital other people deposit into strategies they run, so the market prices them alike; the
+ * staking family all wrap a chain's staking yield; the derivatives family all sell leverage or
+ * convexity; lending, CDP and DEX families likewise share one revenue shape. A category not named
+ * here has no family and falls straight to the market median when it is thin.
+ */
+export const FAMILIES: Record<string, string> = {
+  'Risk Curators': 'Managed vaults & allocators',
+  'Onchain Capital Allocator': 'Managed vaults & allocators',
+  'Yield Aggregator': 'Managed vaults & allocators',
+  'Collateral Markets': 'Managed vaults & allocators',
+  'Liquid Staking': 'Staking & restaking',
+  'Liquid Restaking': 'Staking & restaking',
+  'Restaking': 'Staking & restaking',
+  'Staking Pool': 'Staking & restaking',
+  'Derivatives': 'Derivatives & options',
+  'Options': 'Derivatives & options',
+  'Options Vault': 'Derivatives & options',
+  'Interest Rate Derivatives': 'Derivatives & options',
+  'Lending': 'Lending & CDP',
+  'Uncollateralized Lending': 'Lending & CDP',
+  'CDP': 'Lending & CDP',
+  'CDP Manager': 'Lending & CDP',
+  'Dexs': 'DEX & liquidity',
+  'Liquidity Manager': 'DEX & liquidity',
+  'Yield': 'Yield & farming',
+  'Farm': 'Yield & farming',
+  'Leveraged Farming': 'Yield & farming',
+};
+
+/** The resolved peer set behind one category's multiple. */
+export interface ResolvedMultiple {
+  multiple: number;
+  q1: number;
+  q3: number;
+  peers: number;
+  source: MultipleSource;
+  group: string;
+}
+
+/**
+ * A confidence grade from a peer set. Two things make a median trustworthy: how many peers stand
+ * behind it, and how far apart those peers are (the middle half's width against the median).
+ * Many peers in a tight spread is high; a large peer set is medium even when its peers disagree —
+ * a median of fifteen is a stable centre of a genuinely dispersed market; a thin set, or a
+ * mid-size set spread very wide, is low, and the row says so.
+ */
+export function confidenceFor(peers: number, medianMultiple: number, q1: number, q3: number): Confidence {
+  const spread = medianMultiple > 0 ? (q3 - q1) / medianMultiple : Number.POSITIVE_INFINITY;
+  if (peers >= 8 && spread <= 3) return 'high';
+  if (peers >= 8 || (peers >= 4 && spread <= 5.5)) return 'medium';
+  return 'low';
 }
 
 /** A whole day count from `listedAt` to `asOf`, clamped at zero; null when either date is absent. */
@@ -222,56 +339,101 @@ export function isRankable(p: SnapshotProtocol): boolean {
   return true;
 }
 
+/** One peer set's summary: median, quartiles, and the peers themselves, largest market cap first. */
+function summarize(peers: { p: SnapshotProtocol; multiple: number }[]): { median: number; q1: number; q3: number; peerList: CompPeer[] } {
+  const values = peers.map((x) => x.multiple);
+  const peerList = [...peers]
+    .sort((a, b) => (b.p.mcap_usd ?? 0) - (a.p.mcap_usd ?? 0))
+    .map((x) => ({ name: x.p.name, symbol: x.p.symbol, multiple: round4(x.multiple), mcap_usd: x.p.mcap_usd ?? 0 }));
+  return { median: median(values), q1: quartile(values, 0.25), q3: quartile(values, 0.75), peerList };
+}
+
 /**
- * The comparables table: for every category, the median market-cap/TVL multiple of its tokenized
- * protocols, plus the market-wide median used when a category has too few peers to read.
+ * The comparables table: for every category and every family, the median market-cap/TVL multiple
+ * of its tokenized protocols and the middle half around it, plus the market-wide figures used
+ * when neither a category nor its family has enough peers to read. A peer is a protocol with a
+ * recorded market cap and TVL above zero; a zero or missing market cap is no evidence and is out.
  */
-export function buildComps(snapshot: Snapshot, model: ModelConstants = MODEL): { comps: CompGroup[]; globalMultiple: number; multipleFor: Map<string, { multiple: number; peers: number }> } {
-  const byCategory = new Map<string, number[]>();
-  const all: number[] = [];
+export function buildComps(snapshot: Snapshot, model: ModelConstants = MODEL): { comps: CompGroup[]; families: CompGroup[]; globalMultiple: number; globalQ1: number; globalQ3: number; multipleFor: Map<string, ResolvedMultiple> } {
+  const byCategory = new Map<string, { p: SnapshotProtocol; multiple: number }[]>();
+  const byFamily = new Map<string, { p: SnapshotProtocol; multiple: number }[]>();
+  const all: { p: SnapshotProtocol; multiple: number }[] = [];
   for (const p of snapshot.protocols) {
     if (p.mcap_usd === null || p.tvl_usd <= 0) continue;
     const multiple = p.mcap_usd / p.tvl_usd;
     if (!Number.isFinite(multiple) || multiple <= 0) continue;
-    all.push(multiple);
+    const entry = { p, multiple };
+    all.push(entry);
     const key = p.category ?? 'Uncategorized';
     const list = byCategory.get(key);
-    if (list === undefined) byCategory.set(key, [multiple]);
-    else list.push(multiple);
-  }
-  const globalMultiple = all.length > 0 ? median(all) : 0.2;
-  const comps: CompGroup[] = [];
-  const multipleFor = new Map<string, { multiple: number; peers: number }>();
-  for (const [category, values] of byCategory) {
-    if (values.length >= model.min_peers) {
-      const m = median(values);
-      comps.push({ category, peers: values.length, median_multiple: round4(m) });
-      multipleFor.set(category, { multiple: m, peers: values.length });
+    if (list === undefined) byCategory.set(key, [entry]);
+    else list.push(entry);
+    const family = FAMILIES[key];
+    if (family !== undefined) {
+      const flist = byFamily.get(family);
+      if (flist === undefined) byFamily.set(family, [entry]);
+      else flist.push(entry);
     }
   }
+  const globalStats = all.length > 0 ? summarize(all) : { median: 0.2, q1: 0.05, q3: 0.6, peerList: [] };
+  const toGroup = (category: string, peers: { p: SnapshotProtocol; multiple: number }[]): CompGroup => {
+    const s = summarize(peers);
+    return { category, peers: peers.length, median_multiple: round4(s.median), q1_multiple: round4(s.q1), q3_multiple: round4(s.q3), peer_list: s.peerList };
+  };
+  const comps: CompGroup[] = [];
+  const families: CompGroup[] = [];
+  const catStats = new Map<string, ReturnType<typeof summarize>>();
+  const famStats = new Map<string, ReturnType<typeof summarize>>();
+  for (const [category, peers] of byCategory) {
+    catStats.set(category, summarize(peers));
+    if (peers.length >= model.min_peers) comps.push(toGroup(category, peers));
+  }
+  for (const [family, peers] of byFamily) {
+    famStats.set(family, summarize(peers));
+    if (peers.length >= model.min_peers) families.push(toGroup(family, peers));
+  }
   comps.sort((a, b) => b.median_multiple - a.median_multiple);
-  return { comps, globalMultiple, multipleFor };
+  families.sort((a, b) => b.median_multiple - a.median_multiple);
+  const multipleFor = new Map<string, ResolvedMultiple>();
+  for (const [category, peers] of byCategory) {
+    const own = catStats.get(category)!;
+    if (peers.length >= model.min_peers) {
+      multipleFor.set(category, { multiple: own.median, q1: own.q1, q3: own.q3, peers: peers.length, source: 'category', group: category });
+      continue;
+    }
+    const family = FAMILIES[category];
+    const famPeers = family === undefined ? undefined : byFamily.get(family);
+    if (family !== undefined && famPeers !== undefined && famPeers.length >= model.min_peers) {
+      const fs = famStats.get(family)!;
+      multipleFor.set(category, { multiple: fs.median, q1: fs.q1, q3: fs.q3, peers: famPeers.length, source: 'family', group: family });
+    }
+  }
+  return { comps, families, globalMultiple: globalStats.median, globalQ1: globalStats.q1, globalQ3: globalStats.q3, multipleFor };
 }
 
-/** The factors and the implied value one protocol gets under `model` and the comparables table. */
+/** The factors, the implied value and its range for one protocol under `model` and the comps table. */
 export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
   model: ModelConstants,
-  multipleFor: Map<string, { multiple: number; peers: number }>,
-  globalMultiple: number,
-): { implied: number; multiple: number; peers: number; momentumPct: number; momentumFactor: number; longevityFactor: number; age: number | null } {
+  multipleFor: Map<string, ResolvedMultiple>,
+  globalStats: { multiple: number; q1: number; q3: number; peers: number },
+): { implied: number; low: number; high: number; resolved: ResolvedMultiple; confidence: Confidence; momentumPct: number; momentumFactor: number; longevityFactor: number; age: number | null } {
   const comp = multipleFor.get(protocol.category ?? 'Uncategorized');
-  const multiple = comp === undefined ? globalMultiple : comp.multiple;
-  const peers = comp === undefined ? 0 : comp.peers;
+  const resolved: ResolvedMultiple = comp === undefined
+    ? { multiple: globalStats.multiple, q1: globalStats.q1, q3: globalStats.q3, peers: globalStats.peers, source: 'market', group: 'All tokenized protocols' }
+    : comp;
   const age = ageDays(asOf, protocol.listed_at);
   const rawMomentum = finite(protocol.change_7d, 0);
   const momentumPct = Math.min(model.momentum_cap_pct, Math.max(model.momentum_floor_pct, rawMomentum));
   const momentumFactor = 1 + (momentumPct / 100) * model.momentum_weight;
   const ageForModel = age ?? model.unknown_age_days;
   const longevityFactor = model.longevity_floor + (Math.min(Math.max(ageForModel, 0), model.longevity_days) / model.longevity_days) * model.longevity_range;
-  const implied = Math.max(1, Math.round(protocol.tvl_usd * multiple * momentumFactor * longevityFactor));
-  return { implied, multiple, peers, momentumPct, momentumFactor, longevityFactor, age };
+  const at = (multiple: number): number => Math.max(1, Math.round(protocol.tvl_usd * multiple * momentumFactor * longevityFactor));
+  const implied = at(resolved.multiple);
+  const low = Math.min(implied, at(resolved.q1));
+  const high = Math.max(implied, at(resolved.q3));
+  return { implied, low, high, resolved, confidence: confidenceFor(resolved.peers, resolved.multiple, resolved.q1, resolved.q3), momentumPct, momentumFactor, longevityFactor, age };
 }
 
 const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
@@ -287,6 +449,35 @@ export interface BoardSummary {
   board_size: number;
   early_size: number;
   live_size: number;
+}
+
+/** A whole-dollar figure in words, for the thesis lines: $2.75B, $312M, $940K. */
+function moneyWords(n: number): string {
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${Math.round(n / 1e6)}M`;
+  if (n >= 1e3) return `$${Math.round(n / 1e3)}K`;
+  return `$${Math.round(n)}`;
+}
+
+/**
+ * A row's farm thesis: one line of true statements about this protocol, assembled from its record
+ * and its standing among the board's pre-token protocols in its category — its size rank there,
+ * its week's direction when the week was decisive, and how long it has run with no token. Every
+ * clause is computed; nothing is written by hand for any name.
+ */
+export function thesisFor(p: SnapshotProtocol, age: number | null, categoryTvlRank: number, categoryCount: number, watchlist: boolean): string {
+  const clauses: string[] = [];
+  const cat = p.category ?? 'Uncategorized';
+  if (categoryCount >= 3 && categoryTvlRank === 1) clauses.push(`the largest pre-token ${cat} protocol by TVL at ${moneyWords(p.tvl_usd)}`);
+  else if (categoryCount >= 3 && categoryTvlRank <= 3) clauses.push(`#${categoryTvlRank} pre-token ${cat} protocol by TVL at ${moneyWords(p.tvl_usd)}`);
+  else clauses.push(`a pre-token ${cat} protocol with ${moneyWords(p.tvl_usd)} of TVL`);
+  if (p.change_7d !== null && p.change_7d >= 10) clauses.push(`and TVL up ${p.change_7d.toFixed(1)}% in seven days — growth a launch would be sold into`);
+  else if (p.change_7d !== null && p.change_7d <= -10) clauses.push(`but TVL is down ${Math.abs(p.change_7d).toFixed(1)}% in seven days, so the plan below is sized defensively`);
+  if (age !== null && age >= 730) clauses.push(`; it has run ${(age / 365.25).toFixed(1)} years with no token, the long tokenless record this model pays a premium for`);
+  else if (age !== null && age < 180) clauses.push(`; it is young — tracked for ${age} days — so its record is short and its range deserves the doubt the confidence grade shows`);
+  if (watchlist) clauses.push(`. It sits on the house watchlist, over the $50M floor`);
+  const line = `${clauses.join('')}.`;
+  return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
 /**
@@ -305,38 +496,80 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of snapshot.protocols) {
     if (!chosen.has(p.slug) && isRankable(p)) chosen.set(p.slug, p);
   }
-  const { multipleFor, globalMultiple } = buildComps(snapshot, model);
+  const { multipleFor, globalMultiple, globalQ1, globalQ3 } = buildComps(snapshot, model);
+  const peerCount = snapshot.protocols.filter((p) => p.mcap_usd !== null && p.tvl_usd > 0 && p.mcap_usd / p.tvl_usd > 0).length;
+  const globalStats = { multiple: globalMultiple, q1: globalQ1, q3: globalQ3, peers: peerCount };
+  // Where an implied value would sit among the market caps that actually trade today.
+  const liveMcaps = snapshot.protocols
+    .filter((p) => p.mcap_usd !== null)
+    .map((p) => p.mcap_usd!)
+    .sort((a, b) => b - a);
+  const liveRankOf = (value: number): number => {
+    let lo = 0;
+    let hi = liveMcaps.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (liveMcaps[mid]! > value) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo + 1;
+  };
+  // Each protocol's TVL rank among the board's pre-token protocols in its own category.
+  const byCategory = new Map<string, SnapshotProtocol[]>();
+  for (const p of chosen.values()) {
+    const key = p.category ?? 'Uncategorized';
+    const list = byCategory.get(key);
+    if (list === undefined) byCategory.set(key, [p]);
+    else list.push(p);
+  }
+  const catRank = new Map<string, { rank: number; count: number }>();
+  for (const list of byCategory.values()) {
+    const sorted = [...list].sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1));
+    sorted.forEach((p, i) => catRank.set(p.slug, { rank: i + 1, count: sorted.length }));
+  }
   const scored = [...chosen.values()].map((p) => {
-    const v = impliedValue(p, snapshot.as_of, model, multipleFor, globalMultiple);
+    const v = impliedValue(p, snapshot.as_of, model, multipleFor, globalStats);
     return { p, ...v };
   });
   scored.sort((a, b) => b.implied - a.implied || b.p.tvl_usd - a.p.tvl_usd || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  return scored.map((s, i) => ({
-    rank: i + 1,
-    slug: s.p.slug,
-    name: s.p.name,
-    category: s.p.category,
-    chains: s.p.chains,
-    tvl_usd: s.p.tvl_usd,
-    change_7d: s.p.change_7d,
-    mcap_usd: s.p.mcap_usd,
-    listed_at: s.p.listed_at,
-    gecko_id: s.p.gecko_id,
-    symbol: s.p.symbol,
-    token_status: 'pre-token' as const,
-    watchlist: watchlist.has(s.p.slug),
-    age_days: s.age,
-    implied_value_usd: s.implied,
-    model: {
-      category_multiple: round4(s.multiple),
-      comp_peers: s.peers,
-      momentum_pct: s.momentumPct,
-      momentum_factor: round4(s.momentumFactor),
-      longevity_factor: round4(s.longevityFactor),
+  return scored.map((s, i) => {
+    const standing = catRank.get(s.p.slug) ?? { rank: 1, count: 1 };
+    return {
+      rank: i + 1,
+      slug: s.p.slug,
+      name: s.p.name,
+      category: s.p.category,
+      chains: s.p.chains,
+      tvl_usd: s.p.tvl_usd,
+      change_7d: s.p.change_7d,
+      mcap_usd: s.p.mcap_usd,
+      listed_at: s.p.listed_at,
+      gecko_id: s.p.gecko_id,
+      symbol: s.p.symbol,
+      token_status: 'pre-token' as const,
+      watchlist: watchlist.has(s.p.slug),
       age_days: s.age,
-    },
-    farm_steps: farmSteps(s.p, s.age).map(stepText),
-  }));
+      implied_value_usd: s.implied,
+      implied_low_usd: s.low,
+      implied_high_usd: s.high,
+      live_rank: liveRankOf(s.implied),
+      thesis: thesisFor(s.p, s.age, standing.rank, standing.count, watchlist.has(s.p.slug)),
+      model: {
+        category_multiple: round4(s.resolved.multiple),
+        comp_peers: s.resolved.peers,
+        multiple_source: s.resolved.source,
+        multiple_group: s.resolved.group,
+        q1_multiple: round4(s.resolved.q1),
+        q3_multiple: round4(s.resolved.q3),
+        confidence: s.confidence,
+        momentum_pct: s.momentumPct,
+        momentum_factor: round4(s.momentumFactor),
+        longevity_factor: round4(s.longevityFactor),
+        age_days: s.age,
+      },
+      farm_steps: farmSteps(s.p, s.age).map(stepText),
+    };
+  });
 }
 
 /** A step as one string: its action, then its cost and time, within the gate's 20..600 characters. */
@@ -390,7 +623,31 @@ function playbook(p: SnapshotProtocol, capital: number, chain: string): { first:
       risk: `Liquidation is the risk here: check the position's health factor weekly and top up collateral if it drifts toward 1.2.`,
     };
   }
-  if (c.includes('dex') || c.includes('amm') || c.includes('exchange')) {
+  if (c.includes('curator') || c.includes('allocator') || c.includes('aggregator')) {
+    return {
+      first: `Deposit $${capital} of USDC into ${name}'s flagship vault on ${chain}; a curator's vault shares in the depositing wallet are the position its points and fee-sharing programs count.`,
+      second: `Read the vault's allocation list before adding more: note which markets the curator lends into, then split a smaller slice into a second ${name} vault with a different risk profile so the wallet shows a deliberate choice, not one click.`,
+      weekly: `Check the vault's APY and its allocation changes each week, and harvest or restake any vault rewards; curators reward depositors who stay through several distribution snapshots.`,
+      risk: `Curator risk is the risk here: the vault is only as safe as the markets the curator allocates to, so withdraw if allocations drift into markets you would not lend to yourself.`,
+    };
+  }
+  if (c.includes('basis')) {
+    return {
+      first: `Deposit $${capital} of USDC into ${name}'s basis vault on ${chain}; the vault runs the delta-neutral trade (spot against a short perp) and the deposit is the position that earns the funding harvest.`,
+      second: `Leave the deposit untouched for a full funding cycle and read the vault's reported breakdown once — spot leg, perp leg, funding earned — so you know what you actually own before adding a second, smaller deposit.`,
+      weekly: `Check the vault's yield against current funding rates each week; a basis vault that keeps paying while funding is negative is paying out of reserves, which is your signal to leave.`,
+      risk: `Funding can flip and stay negative, and the perp leg sits on an exchange: counterparty and funding risk are the price of this yield, so keep the position at farm size.`,
+    };
+  }
+  if (c === 'chain') {
+    return {
+      first: `Bridge $${capital} of USDC or ETH from Ethereum to ${name} using its official bridge page, then hold a small amount of the chain's gas token in the same wallet; a funded, active address is what chain incentive programs count.`,
+      second: `Use two or three of the chain's native apps in the first week — a swap on its main DEX and a deposit in its main lending market — so the wallet reads as a real user of the network, not a bridged-and-idle address.`,
+      weekly: `Make a handful of real transactions each week (a swap, a claim, a vote) and keep the gas balance topped up; chains reward sustained activity across snapshots, not one busy day.`,
+      risk: `Bridge and new-chain risk are the risks here: bridges are the most-attacked contracts in crypto, so cross with farm size only and verify the bridge address on the chain's official site.`,
+    };
+  }
+  if (c.includes('dex') || c.includes('amm') || c.includes('exchange') || c.includes('liquidity')) {
     return {
       first: `Swap about $${Math.round(capital / 2)} through ${name}'s main market on ${chain} so the wallet has real trading volume with the protocol.`,
       second: `Provide the remaining $${capital - Math.round(capital / 2)} as liquidity in ${name}'s deepest stable or blue-chip pool and keep the LP position open.`,
@@ -545,8 +802,15 @@ export function radarRow(row: BoardRow): RadarRow {
     age_days: row.age_days,
     watchlist: row.watchlist,
     implied_value_usd: row.implied_value_usd,
+    implied_low_usd: row.implied_low_usd,
+    implied_high_usd: row.implied_high_usd,
+    live_rank: row.live_rank,
+    thesis: row.thesis,
     category_multiple: row.model.category_multiple,
     comp_peers: row.model.comp_peers,
+    multiple_source: row.model.multiple_source,
+    multiple_group: row.model.multiple_group,
+    confidence: row.model.confidence,
     momentum_factor: row.model.momentum_factor,
     longevity_factor: row.model.longevity_factor,
     farm_steps: row.farm_steps,
@@ -557,7 +821,7 @@ export function radarRow(row: BoardRow): RadarRow {
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
-  const { comps, globalMultiple } = buildComps(snapshot, model);
+  const { comps, families, globalMultiple, globalQ1, globalQ3 } = buildComps(snapshot, model);
   const early = board.filter((r) => !r.watchlist).length;
   const radar: RadarData = {
     as_of: snapshot.as_of,
@@ -566,7 +830,11 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     model,
     model_version: MODEL_VERSION,
     global_multiple: round4(globalMultiple),
+    global_q1: round4(globalQ1),
+    global_q3: round4(globalQ3),
+    live_total: snapshot.protocols.filter((p) => p.mcap_usd !== null).length,
     comps,
+    families,
     universe_size: snapshot.protocols.length,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
@@ -643,6 +911,9 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
     }
     if (!Number.isSafeInteger(r.implied_value_usd) || r.implied_value_usd <= 0 || r.implied_value_usd > 100_000_000_000_000) {
       return `${r.slug} has implied value ${r.implied_value_usd}`;
+    }
+    if (!(r.implied_low_usd >= 1 && r.implied_low_usd <= r.implied_value_usd && r.implied_value_usd <= r.implied_high_usd)) {
+      return `${r.slug} has a broken value range ${r.implied_low_usd}..${r.implied_high_usd} around ${r.implied_value_usd}`;
     }
   }
   return null;
