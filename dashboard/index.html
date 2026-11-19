@@ -30,19 +30,23 @@
     <div class="factors">
       <article>
         <h3>1 · Comparables, in three steps</h3>
-        <p>Tokenized protocols reveal what the market pays per $1 of TVL, and it is not one price: in this snapshot the median runs <strong id="fact-comp"></strong>. A row is priced by its own category's median when that category has three or more tokenized peers; by its category <em>family's</em> median when the category is thin but the family — categories running the same business — is not; and only then by the market-wide median. Every multiple names the peers behind it, below.</p>
+        <p>Tokenized protocols reveal what the market pays per $1 of TVL, and it is not one price: in this snapshot the median runs <strong id="fact-comp"></strong>. A row is priced by its own category's median when that category has three or more tokenized peers; by its category <em>family's</em> median when the category is thin but the family — categories running the same business — is not; and only then by the market-wide median. Multiples are compared on a log scale, and every multiple names the peers behind it, below.</p>
       </article>
       <article>
-        <h3>2 · A range, graded</h3>
-        <p>Each row carries the range its peers' middle half implies — first to third quartile — and a confidence grade from the peer count and their spread. Medians and quartiles, never averages: one tokenized peer in this snapshot trades at 400× its TVL, and an average would let it price a category.</p>
+        <h3>2 · A second opinion</h3>
+        <p>A least-squares fit of log market cap on log TVL over every tokenized protocol — the market's <em>size curve</em> — prices each row again from its size alone, blind to category: <strong id="fact-reg"></strong>. The implied value blends the two legs, weighted toward comparables by the row's confidence (70 / 60 / 50%). Two methods that disagree are shown disagreeing.</p>
       </article>
       <article>
-        <h3>3 · Momentum</h3>
+        <h3>3 · A range, graded — and calibrated</h3>
+        <p>Each row carries a range and a confidence grade from its peer count and spread. Then the whole model is run backwards over the snapshot's live tokens, each priced as if pre-token with itself left out, and each grade's range is widened by that grade's own record of misses — so a printed range means the same thing on every row. <strong id="fact-backtest"></strong> Medians and quartiles, never averages: one tokenized peer here trades at 400× its TVL, and an average would let it price a category.</p>
+      </article>
+      <article>
+        <h3>4 · Momentum</h3>
         <p>The 7-day TVL change, clamped to −40%…+80%, scales value by <strong>0.76×–1.48×</strong>. Growing protocols are gaining the users a token would be sold to; shrinking ones are losing them.</p>
       </article>
       <article>
-        <h3>4 · Longevity</h3>
-        <p>Age scales value by <strong>0.75×–1.25×</strong> over four years. A protocol that has run for years with no token has survived the audits, bear markets and exploits that killed younger rivals.</p>
+        <h3>5 · Longevity</h3>
+        <p>Age scales value by <strong>0.75×–1.25×</strong> over four years. A protocol that has run for years with no token has survived the audits, bear markets and exploits that killed younger rivals. Each row's detail also restates its value at a typical launch's float — about 15% of supply trading on day one, the rest behind vesting cliffs.</p>
       </article>
     </div>
     <div class="comps-wrap">
@@ -89,7 +93,7 @@
     <div class="table-wrap">
       <table class="board" id="board"></table>
     </div>
-    <p class="hint">Each row shows the point estimate, the range its peers' middle half implies, and a confidence grade. Select any row for its full record: the model's arithmetic, the peers behind its multiple, and its step-by-step farm plan.</p>
+    <p class="hint">Each row shows the blended point estimate, its calibrated range, and a confidence grade whose backtest record is printed above. Select any row for its full record: both valuation legs, the peers behind its multiple, what would make its number wrong, and its step-by-step farm plan.</p>
   </section>
 
   <section class="panel detail" id="detail" hidden aria-label="Protocol detail"></section>

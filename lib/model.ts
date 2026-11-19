@@ -1,7 +1,7 @@
 // Token Launch Radar — the valuation model.
 //
 // The question this board answers: if a pre-token protocol issued a token today, what would the
-// market plausibly pay for it? The model answers with the snapshot's own evidence, in three parts:
+// market plausibly pay for it? The model answers with the snapshot's own evidence, in five parts:
 //
 //   1. COMPARABLES. Protocols that already have a token reveal what the market pays per dollar of
 //      TVL, and the price differs sharply by category: in this snapshot the median market-cap/TVL
@@ -13,25 +13,51 @@
 //           categories running the same business (vault curators and allocators; the staking
 //           family; the derivatives family; see FAMILIES below) — has at least three;
 //        c. the market-wide median, only when neither the category nor its family can be read.
-//      Medians and quartiles, never means: one 400x prediction-market token or one 69x exchange
-//      would poison an average, and this snapshot has both. A pre-token protocol's base value is
-//      its TVL times the resolved multiple — the value of a typical tokenized peer.
-//   2. A RANGE, NOT JUST A POINT. The peers' middle half (their first-to-third quartile
+//      Multiples are ratios, so their statistics are taken on a log scale: the middle half of a
+//      peer set is measured geometrically, which puts a peer at a tenth of the median and a peer
+//      at ten times it the same distance away. Medians and quartiles, never means: one 400x
+//      prediction-market token or one 69x exchange would poison an average, and this snapshot
+//      has both. A pre-token protocol's comparables value is its TVL times the resolved
+//      multiple — the value of a typical tokenized peer.
+//   2. A SECOND, INDEPENDENT LEG. A least-squares fit of log market cap on log TVL over every
+//      tokenized protocol in the snapshot — the market's size curve — prices the same protocol
+//      from its size alone, blind to its category. The row's implied value is a blend of the two
+//      legs in log space, weighted toward comparables by the row's confidence (0.70 / 0.60 /
+//      0.50): where the peer evidence is strong it leads, where it is thin the size curve gets
+//      an equal say. Two methods that disagree are shown disagreeing — the value range is
+//      widened to cover both legs, and the row's pre-mortem names the disagreement.
+//   3. A RANGE, NOT JUST A POINT. The peers' middle half (their first-to-third quartile
 //      multiples) becomes the row's value range: low = TVL x Q1, high = TVL x Q3, with the same
-//      momentum and longevity factors applied. Each row also carries a confidence grade from the
-//      peer count and the spread: many peers agreeing tightly is high confidence; few peers
-//      spread widely is low, and the dashboard says so on the row.
-//   3. MOMENTUM. A protocol whose TVL grew over the last seven days is gaining users faster than
-//      its peers; one that is shrinking is losing them. The base is scaled by the 7-day change,
-//      clamped so one wild week cannot dominate: -40%..+80% maps to a 0.76x..1.48x factor.
-//   4. LONGEVITY. A protocol that has run for years without a token has survived audits, bear
-//      markets and exploits that killed younger rivals. Age scales the base from 0.75x (brand new)
-//      to 1.25x (four years or more), linearly.
+//      momentum and longevity factors applied, widened to include the second leg's estimate.
+//      Each row also carries a confidence grade from the peer count and the spread: many peers
+//      agreeing tightly is high confidence; few peers spread widely is low, and the dashboard
+//      says so on the row.
+//   4. CALIBRATION, MEASURED NOT ASSERTED. Before the board is priced, the whole model is run
+//      backwards over the snapshot's tokenized protocols: each is priced as if it were
+//      pre-token, with itself left out of its own peer set and out of the size-curve fit. The
+//      signed misses, grouped by confidence grade, set each grade's band: a row's range is
+//      widened by its grade's own middle half of misses, so a stated range means the same
+//      thing on a high-confidence row as on a low one — tight peer sets earn narrow bands
+//      only if their record says they may. The hit rate of the printed ranges — overall and
+//      per grade — and the typical miss are published in the dashboard's dataset, so the
+//      grades on the rows are claims with a measured record behind them.
+//   5. MOMENTUM AND LONGEVITY. A protocol whose TVL grew over the last seven days is gaining
+//      users faster than its peers; one that is shrinking is losing them. The base is scaled by
+//      the 7-day change, clamped so one wild week cannot dominate: -40%..+80% maps to a
+//      0.76x..1.48x factor. Age scales the base from 0.75x (brand new) to 1.25x (four years or
+//      more), linearly: a protocol that has run for years without a token has survived audits,
+//      bear markets and exploits that killed younger rivals.
 //
-//   implied_value = TVL x peer_multiple x momentum_factor x longevity_factor
+//   implied_value = blend(comparables, size curve) x momentum_factor x longevity_factor
 //
-// No protocol name is ever special-cased: the same function scores every row, and the dashboard
-// shows every input, factor, peer and quartile for every row, so a reader can check the arithmetic.
+// Every row also carries two honesty devices. A PRE-MORTEM names the single strongest reason
+// its own number could be wrong, computed from the row's weakest signal. And a FLOAT figure
+// restates the implied value at a typical launch's initial float (see INITIAL_FLOAT): the
+// implied value is a fully-diluted-style claim, and only a slice of a new token trades on day
+// one — the rest sits behind team and investor vesting cliffs, the overhang every launch
+// carries. No protocol name is ever special-cased: the same function scores every row, and the
+// dashboard shows every input, factor, peer and quartile for every row, so a reader can check
+// the arithmetic.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -93,6 +119,10 @@ export interface ModelConstants {
   longevity_range: number;
   longevity_days: number;
   unknown_age_days: number;
+  /** The blend's weight on the comparables leg, by confidence grade; the size curve gets the rest. */
+  blend_high: number;
+  blend_medium: number;
+  blend_low: number;
 }
 
 export const MODEL: ModelConstants = {
@@ -104,9 +134,22 @@ export const MODEL: ModelConstants = {
   longevity_range: 0.5,
   longevity_days: 1460,
   unknown_age_days: 365,
+  blend_high: 0.7,
+  blend_medium: 0.6,
+  blend_low: 0.5,
 };
 
-export const MODEL_VERSION = 'comps-2';
+export const MODEL_VERSION = 'comps-3';
+
+/**
+ * The share of a typical launch's supply that trades on day one, used only to restate a row's
+ * implied value as a float figure. Launch benchmarks (100+ launches through 2025): insiders —
+ * team 15–20% and investors 12–18% of supply — sit behind 6-to-12-month cliffs and multi-year
+ * vesting, the public sale is 1–5%, and only part of the ecosystem tranche unlocks at the
+ * generation event, which puts a typical initial float in the 10–20% band. 15% is its middle.
+ * It is a scenario restatement, never a prediction about any one protocol's token design.
+ */
+export const INITIAL_FLOAT = 0.15;
 
 /** How many live-token protocols the comparables view carries, by market cap. */
 export const LIVE_ROWS = 30;
@@ -140,6 +183,10 @@ export interface BoardRow {
   implied_high_usd: number;
   live_rank: number;
   thesis: string;
+  /** The pre-mortem: the strongest single reason this row's own number could be wrong. */
+  risk_note: string;
+  /** The implied value restated at a typical launch's initial float (INITIAL_FLOAT). */
+  float_value_usd: number;
   model: {
     category_multiple: number;
     comp_peers: number;
@@ -152,6 +199,11 @@ export interface BoardRow {
     momentum_factor: number;
     longevity_factor: number;
     age_days: number | null;
+    /** The two legs before blending, each with the momentum and longevity factors applied. */
+    comps_value_usd: number;
+    regression_value_usd: number;
+    /** The weight the blend put on the comparables leg (the size curve got the rest). */
+    blend_weight: number;
   };
   farm_steps: string[];
 }
@@ -173,6 +225,8 @@ export interface RadarRow {
   implied_high_usd: number;
   live_rank: number;
   thesis: string;
+  risk_note: string;
+  float_value_usd: number;
   category_multiple: number;
   comp_peers: number;
   multiple_source: MultipleSource;
@@ -180,6 +234,9 @@ export interface RadarRow {
   confidence: Confidence;
   momentum_factor: number;
   longevity_factor: number;
+  comps_value_usd: number;
+  regression_value_usd: number;
+  blend_weight: number;
   farm_steps: string[];
 }
 
@@ -196,6 +253,36 @@ export interface LiveRow {
   symbol: string | null;
 }
 
+/** The market's size curve: a least-squares fit of log market cap on log TVL over the live tokens. */
+export interface RegressionFit {
+  slope: number;
+  intercept: number;
+  n: number;
+  r2: number;
+}
+
+/** One confidence grade's record in the leave-one-out backtest. */
+export interface BacktestGrade {
+  n: number;
+  hit_rate_pct: number;
+}
+
+/**
+ * The model's calibration record: every tokenized protocol priced as if pre-token, itself left
+ * out of its peer set and the size-curve fit, its real market cap checked against the stated
+ * range. hit_rate_pct is how often the printed range held, overall and per grade;
+ * median_error_factor is the typical miss of the point estimate, as a multiple (2.0 = the
+ * real token traded at twice, or half, the model's point). bands holds the per-grade
+ * multiplicative widening the calibration applies to each row's range (see calibrationBands).
+ */
+export interface BacktestStats {
+  n: number;
+  hit_rate_pct: number;
+  median_error_factor: number;
+  bands: Record<Confidence, { lo: number; hi: number }>;
+  grades: Record<Confidence, BacktestGrade>;
+}
+
 /** Everything the dashboard needs: the board, the live comparables, and the model behind them. */
 export interface RadarData {
   as_of: string;
@@ -206,6 +293,9 @@ export interface RadarData {
   global_multiple: number;
   global_q1: number;
   global_q3: number;
+  regression: RegressionFit;
+  backtest: BacktestStats;
+  initial_float: number;
   live_total: number;
   comps: CompGroup[];
   families: CompGroup[];
@@ -339,22 +429,32 @@ export function isRankable(p: SnapshotProtocol): boolean {
   return true;
 }
 
-/** One peer set's summary: median, quartiles, and the peers themselves, largest market cap first. */
+/**
+ * One peer set's summary: median, quartiles, and the peers themselves, largest market cap first.
+ * The statistics are taken on the multiples' logs and exponentiated back: a multiple is a ratio,
+ * and on a ratio scale the middle half should be measured geometrically — a peer at a tenth of
+ * the median and a peer at ten times it are equally far from the centre, and the quartiles say so.
+ */
 function summarize(peers: { p: SnapshotProtocol; multiple: number }[]): { median: number; q1: number; q3: number; peerList: CompPeer[] } {
-  const values = peers.map((x) => x.multiple);
+  const logs = peers.map((x) => Math.log(x.multiple));
   const peerList = [...peers]
     .sort((a, b) => (b.p.mcap_usd ?? 0) - (a.p.mcap_usd ?? 0))
     .map((x) => ({ name: x.p.name, symbol: x.p.symbol, multiple: round4(x.multiple), mcap_usd: x.p.mcap_usd ?? 0 }));
-  return { median: median(values), q1: quartile(values, 0.25), q3: quartile(values, 0.75), peerList };
+  return { median: Math.exp(median(logs)), q1: Math.exp(quartile(logs, 0.25)), q3: Math.exp(quartile(logs, 0.75)), peerList };
+}
+
+/** The tokenized peers, pooled three ways: by category, by category family, and all together. */
+export interface PeerPools {
+  byCategory: Map<string, { p: SnapshotProtocol; multiple: number }[]>;
+  byFamily: Map<string, { p: SnapshotProtocol; multiple: number }[]>;
+  all: { p: SnapshotProtocol; multiple: number }[];
 }
 
 /**
- * The comparables table: for every category and every family, the median market-cap/TVL multiple
- * of its tokenized protocols and the middle half around it, plus the market-wide figures used
- * when neither a category nor its family has enough peers to read. A peer is a protocol with a
- * recorded market cap and TVL above zero; a zero or missing market cap is no evidence and is out.
+ * The pools every comparables figure comes from. A peer is a protocol with a recorded market
+ * cap and TVL above zero; a zero or missing market cap is no evidence and is out.
  */
-export function buildComps(snapshot: Snapshot, model: ModelConstants = MODEL): { comps: CompGroup[]; families: CompGroup[]; globalMultiple: number; globalQ1: number; globalQ3: number; multipleFor: Map<string, ResolvedMultiple> } {
+export function buildPools(snapshot: Snapshot): PeerPools {
   const byCategory = new Map<string, { p: SnapshotProtocol; multiple: number }[]>();
   const byFamily = new Map<string, { p: SnapshotProtocol; multiple: number }[]>();
   const all: { p: SnapshotProtocol; multiple: number }[] = [];
@@ -375,6 +475,17 @@ export function buildComps(snapshot: Snapshot, model: ModelConstants = MODEL): {
       else flist.push(entry);
     }
   }
+  return { byCategory, byFamily, all };
+}
+
+/**
+ * The comparables table: for every category and every family, the median market-cap/TVL multiple
+ * of its tokenized protocols and the middle half around it, plus the market-wide figures used
+ * when neither a category nor its family has enough peers to read, and the pools behind them.
+ */
+export function buildComps(snapshot: Snapshot, model: ModelConstants = MODEL): { comps: CompGroup[]; families: CompGroup[]; globalMultiple: number; globalQ1: number; globalQ3: number; multipleFor: Map<string, ResolvedMultiple>; pools: PeerPools } {
+  const pools = buildPools(snapshot);
+  const { byCategory, byFamily, all } = pools;
   const globalStats = all.length > 0 ? summarize(all) : { median: 0.2, q1: 0.05, q3: 0.6, peerList: [] };
   const toGroup = (category: string, peers: { p: SnapshotProtocol; multiple: number }[]): CompGroup => {
     const s = summarize(peers);
@@ -408,7 +519,102 @@ export function buildComps(snapshot: Snapshot, model: ModelConstants = MODEL): {
       multipleFor.set(category, { multiple: fs.median, q1: fs.q1, q3: fs.q3, peers: famPeers.length, source: 'family', group: family });
     }
   }
-  return { comps, families, globalMultiple: globalStats.median, globalQ1: globalStats.q1, globalQ3: globalStats.q3, multipleFor };
+  return { comps, families, globalMultiple: globalStats.median, globalQ1: globalStats.q1, globalQ3: globalStats.q3, multipleFor, pools };
+}
+
+/** The momentum and longevity factors for one protocol, and the age they were priced from. */
+export function factorsFor(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { momentumPct: number; momentumFactor: number; longevityFactor: number; age: number | null } {
+  const age = ageDays(asOf, protocol.listed_at);
+  const rawMomentum = finite(protocol.change_7d, 0);
+  const momentumPct = Math.min(model.momentum_cap_pct, Math.max(model.momentum_floor_pct, rawMomentum));
+  const momentumFactor = 1 + (momentumPct / 100) * model.momentum_weight;
+  const ageForModel = age ?? model.unknown_age_days;
+  const longevityFactor = model.longevity_floor + (Math.min(Math.max(ageForModel, 0), model.longevity_days) / model.longevity_days) * model.longevity_range;
+  return { momentumPct, momentumFactor, longevityFactor, age };
+}
+
+/** The blend's weight on the comparables leg for a confidence grade; the size curve gets the rest. */
+export function blendWeightFor(confidence: Confidence, model: ModelConstants): number {
+  return confidence === 'high' ? model.blend_high : confidence === 'medium' ? model.blend_medium : model.blend_low;
+}
+
+/**
+ * The size curve's raw sums. A least-squares fit is a function of five sums, so a leave-one-out
+ * fit — the backtest's, with the target taken out — is the same fit with the target's own
+ * contributions subtracted from the sums: exact, with no refit loop.
+ */
+export interface RegressionSums {
+  n: number;
+  sx: number;
+  sy: number;
+  sxx: number;
+  sxy: number;
+  syy: number;
+}
+
+/** The sums of log TVL and log market cap over every tokenized peer. */
+export function regressionSums(pools: PeerPools): RegressionSums {
+  const sums: RegressionSums = { n: 0, sx: 0, sy: 0, sxx: 0, sxy: 0, syy: 0 };
+  for (const { p } of pools.all) {
+    const x = Math.log(p.tvl_usd);
+    const y = Math.log(p.mcap_usd!);
+    sums.n += 1;
+    sums.sx += x;
+    sums.sy += y;
+    sums.sxx += x * x;
+    sums.sxy += x * y;
+    sums.syy += y * y;
+  }
+  return sums;
+}
+
+/** A fit from sums: slope, intercept, and the share of the variance the size curve explains. */
+export function regressionFromSums(sums: RegressionSums): RegressionFit {
+  const { n, sx, sy, sxx, sxy, syy } = sums;
+  if (n < 3) return { slope: 1, intercept: Math.log(0.2), n, r2: 0 };
+  const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  const intercept = (sy - slope * sx) / n;
+  const cov = n * sxy - sx * sy;
+  const varX = n * sxx - sx * sx;
+  const varY = n * syy - sy * sy;
+  const r2 = varX > 0 && varY > 0 ? (cov * cov) / (varX * varY) : 0;
+  return { slope, intercept, n, r2 };
+}
+
+/** The size curve's pre-factor value for a TVL: what the market's size curve alone would pay. */
+export function regressionBase(fit: RegressionFit, tvlUsd: number): number {
+  return Math.exp(fit.intercept + fit.slope * Math.log(Math.max(1, tvlUsd)));
+}
+
+/** One priced row's working: the two legs, the blend between them, and the range spanning both. */
+export interface Priced {
+  implied: number;
+  low: number;
+  high: number;
+  compsValue: number;
+  regressionValue: number;
+  blendWeight: number;
+  confidence: Confidence;
+}
+
+/**
+ * Price one protocol from a resolved peer set and the size curve. The comparables leg is the
+ * peer multiple on TVL; the regression leg is the size curve on TVL; both legs take the same
+ * momentum and longevity factors, so they differ only in the evidence behind the base. The
+ * blend is a weighted mean in log space, weighted toward comparables by confidence, and the
+ * range is the peers' middle half widened to include the second leg's point: a row never
+ * claims a band narrower than the disagreement between its own two methods.
+ */
+export function priceWith(tvlUsd: number, resolved: ResolvedMultiple, regBase: number, momentumFactor: number, longevityFactor: number, model: ModelConstants): Priced {
+  const confidence = confidenceFor(resolved.peers, resolved.multiple, resolved.q1, resolved.q3);
+  const at = (multiple: number): number => Math.max(1, Math.round(tvlUsd * multiple * momentumFactor * longevityFactor));
+  const compsValue = at(resolved.multiple);
+  const regressionValue = Math.max(1, Math.round(regBase * momentumFactor * longevityFactor));
+  const blendWeight = blendWeightFor(confidence, model);
+  const implied = Math.max(1, Math.round(Math.exp(blendWeight * Math.log(compsValue) + (1 - blendWeight) * Math.log(regressionValue))));
+  const low = Math.min(at(resolved.q1), regressionValue, implied);
+  const high = Math.max(at(resolved.q3), regressionValue, implied);
+  return { implied, low, high, compsValue, regressionValue, blendWeight, confidence };
 }
 
 /** The factors, the implied value and its range for one protocol under `model` and the comps table. */
@@ -418,22 +624,129 @@ export function impliedValue(
   model: ModelConstants,
   multipleFor: Map<string, ResolvedMultiple>,
   globalStats: { multiple: number; q1: number; q3: number; peers: number },
-): { implied: number; low: number; high: number; resolved: ResolvedMultiple; confidence: Confidence; momentumPct: number; momentumFactor: number; longevityFactor: number; age: number | null } {
+  regBase: number,
+): { implied: number; low: number; high: number; resolved: ResolvedMultiple; confidence: Confidence; momentumPct: number; momentumFactor: number; longevityFactor: number; age: number | null; compsValue: number; regressionValue: number; blendWeight: number } {
   const comp = multipleFor.get(protocol.category ?? 'Uncategorized');
   const resolved: ResolvedMultiple = comp === undefined
     ? { multiple: globalStats.multiple, q1: globalStats.q1, q3: globalStats.q3, peers: globalStats.peers, source: 'market', group: 'All tokenized protocols' }
     : comp;
-  const age = ageDays(asOf, protocol.listed_at);
-  const rawMomentum = finite(protocol.change_7d, 0);
-  const momentumPct = Math.min(model.momentum_cap_pct, Math.max(model.momentum_floor_pct, rawMomentum));
-  const momentumFactor = 1 + (momentumPct / 100) * model.momentum_weight;
-  const ageForModel = age ?? model.unknown_age_days;
-  const longevityFactor = model.longevity_floor + (Math.min(Math.max(ageForModel, 0), model.longevity_days) / model.longevity_days) * model.longevity_range;
-  const at = (multiple: number): number => Math.max(1, Math.round(protocol.tvl_usd * multiple * momentumFactor * longevityFactor));
-  const implied = at(resolved.multiple);
-  const low = Math.min(implied, at(resolved.q1));
-  const high = Math.max(implied, at(resolved.q3));
-  return { implied, low, high, resolved, confidence: confidenceFor(resolved.peers, resolved.multiple, resolved.q1, resolved.q3), momentumPct, momentumFactor, longevityFactor, age };
+  const f = factorsFor(protocol, asOf, model);
+  const priced = priceWith(protocol.tvl_usd, resolved, regBase, f.momentumFactor, f.longevityFactor, model);
+  return { ...priced, resolved, momentumPct: f.momentumPct, momentumFactor: f.momentumFactor, longevityFactor: f.longevityFactor, age: f.age };
+}
+
+/**
+ * The resolved multiple for a category with one protocol left out of every pool — the
+ * backtest's view, in which the target may not stand behind its own price. Same hierarchy as
+ * the board's: its category, then its family, then the whole market.
+ */
+export function resolveExcluding(pools: PeerPools, category: string | null, excludeSlug: string, model: ModelConstants): ResolvedMultiple {
+  const key = category ?? 'Uncategorized';
+  const without = (list: { p: SnapshotProtocol; multiple: number }[] | undefined): { p: SnapshotProtocol; multiple: number }[] =>
+    (list ?? []).filter((x) => x.p.slug !== excludeSlug);
+  const own = without(pools.byCategory.get(key));
+  if (own.length >= model.min_peers) {
+    const s = summarize(own);
+    return { multiple: s.median, q1: s.q1, q3: s.q3, peers: own.length, source: 'category', group: key };
+  }
+  const family = FAMILIES[key];
+  if (family !== undefined) {
+    const fam = without(pools.byFamily.get(family));
+    if (fam.length >= model.min_peers) {
+      const s = summarize(fam);
+      return { multiple: s.median, q1: s.q1, q3: s.q3, peers: fam.length, source: 'family', group: family };
+    }
+  }
+  const all = without(pools.all);
+  const s = summarize(all);
+  return { multiple: s.median, q1: s.q1, q3: s.q3, peers: all.length, source: 'market', group: 'All tokenized protocols' };
+}
+
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+/**
+ * One leave-one-out pricing of a tokenized protocol: the model run as if this protocol had
+ * no token — itself out of its peer set and out of the size-curve fit. Shared by the
+ * calibration passes so both price the target exactly as the board prices a pre-token row.
+ */
+function priceLeaveOneOut(snapshot: Snapshot, pools: PeerPools, sums: RegressionSums, target: SnapshotProtocol, model: ModelConstants): Priced {
+  const resolved = resolveExcluding(pools, target.category, target.slug, model);
+  const x = Math.log(target.tvl_usd);
+  const y = Math.log(target.mcap_usd!);
+  const loo = regressionFromSums({ n: sums.n - 1, sx: sums.sx - x, sy: sums.sy - y, sxx: sums.sxx - x * x, sxy: sums.sxy - x * y, syy: sums.syy - y * y });
+  const f = factorsFor(target, snapshot.as_of, model);
+  return priceWith(target.tvl_usd, resolved, regressionBase(loo, target.tvl_usd), f.momentumFactor, f.longevityFactor, model);
+}
+
+/**
+ * The calibration bands, one per confidence grade: the middle half of that grade's signed
+ * leave-one-out misses, as multiplicative factors on the point estimate. A grade whose rows
+ * historically landed high gets a band that reaches higher; a grade with a tight record
+ * keeps a tight band. The bands are what make a printed range mean the same thing — the
+ * middle half of that grade's own outcomes — on every row of the board.
+ */
+export function calibrationBands(snapshot: Snapshot, pools: PeerPools, model: ModelConstants = MODEL): Record<Confidence, { lo: number; hi: number }> {
+  const sums = regressionSums(pools);
+  const signed: Record<Confidence, number[]> = { high: [], medium: [], low: [] };
+  for (const { p } of pools.all) {
+    const priced = priceLeaveOneOut(snapshot, pools, sums, p, model);
+    signed[priced.confidence].push(Math.log(p.mcap_usd! / priced.implied));
+  }
+  const band = (errors: number[]): { lo: number; hi: number } =>
+    errors.length >= 4 ? { lo: Math.exp(quartile(errors, 0.25)), hi: Math.exp(quartile(errors, 0.75)) } : { lo: 1, hi: 1 };
+  return { high: band(signed.high), medium: band(signed.medium), low: band(signed.low) };
+}
+
+/** A priced row with its range widened by its grade's calibration band. */
+export function widenRange(priced: Priced, bands: Record<Confidence, { lo: number; hi: number }>): Priced {
+  const band = bands[priced.confidence];
+  return {
+    ...priced,
+    low: Math.min(priced.low, Math.max(1, Math.round(priced.implied * band.lo))),
+    high: Math.max(priced.high, Math.round(priced.implied * band.hi)),
+  };
+}
+
+/**
+ * The calibration record: every tokenized protocol priced as if it were pre-token — itself
+ * left out of its peer set and out of the size-curve fit — with its real market cap checked
+ * against the range the board would print for it, calibration bands included. The snapshot's
+ * live tokens are forecasts that have already resolved; this is the model's record against
+ * them, per confidence grade. The bands are calibrated on this same snapshot, so the hit
+ * rates are the in-sample record of the printed ranges — stated as such wherever they appear.
+ */
+export function backtestModel(snapshot: Snapshot, pools: PeerPools, model: ModelConstants = MODEL): BacktestStats {
+  const sums = regressionSums(pools);
+  const bands = calibrationBands(snapshot, pools, model);
+  let hits = 0;
+  const errors: number[] = [];
+  const grades: Record<Confidence, { n: number; hits: number }> = {
+    high: { n: 0, hits: 0 },
+    medium: { n: 0, hits: 0 },
+    low: { n: 0, hits: 0 },
+  };
+  for (const { p } of pools.all) {
+    const priced = widenRange(priceLeaveOneOut(snapshot, pools, sums, p, model), bands);
+    const actual = p.mcap_usd!;
+    const hit = actual >= priced.low && actual <= priced.high;
+    if (hit) hits += 1;
+    errors.push(Math.abs(Math.log(actual / priced.implied)));
+    const g = grades[priced.confidence];
+    g.n += 1;
+    if (hit) g.hits += 1;
+  }
+  const n = pools.all.length;
+  const gradeOut = (g: { n: number; hits: number }): BacktestGrade => ({ n: g.n, hit_rate_pct: g.n > 0 ? round1((g.hits / g.n) * 100) : 0 });
+  const bandOut = (b: { lo: number; hi: number }): { lo: number; hi: number } => ({ lo: round3(b.lo), hi: round3(b.hi) });
+  return {
+    n,
+    hit_rate_pct: n > 0 ? round1((hits / n) * 100) : 0,
+    median_error_factor: errors.length > 0 ? round2(Math.exp(median(errors))) : 1,
+    bands: { high: bandOut(bands.high), medium: bandOut(bands.medium), low: bandOut(bands.low) },
+    grades: { high: gradeOut(grades.high), medium: gradeOut(grades.medium), low: gradeOut(grades.low) },
+  };
 }
 
 const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
@@ -480,6 +793,44 @@ export function thesisFor(p: SnapshotProtocol, age: number | null, categoryTvlRa
   return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
+/** A multiple in words, for the pre-mortem: 0.21x. */
+function multipleWords(n: number): string {
+  return `${round4(n)}x`;
+}
+
+/**
+ * A row's pre-mortem: the single strongest reason its own number could be wrong, picked from
+ * the row's weakest signal — the two methods disagreeing, a thin or widely spread peer set, a
+ * shrinking TVL, a short or unrecorded history — or, when none of those bite, the peer median
+ * itself. Every clause is computed from the row's own record; nothing is written by hand.
+ */
+export function riskNoteFor(
+  p: SnapshotProtocol,
+  resolved: ResolvedMultiple,
+  confidence: Confidence,
+  compsValue: number,
+  regressionValue: number,
+  age: number | null,
+): string {
+  const ratio = Math.max(compsValue, regressionValue) / Math.max(1, Math.min(compsValue, regressionValue));
+  if (ratio >= 2.2) {
+    return `What would make this wrong: the model's two methods disagree — comparables price it at ${moneyWords(compsValue)}, the market-wide size curve at ${moneyWords(regressionValue)}. If ${resolved.group}'s peers re-rate toward the size curve, this row moves with them; the range, not the point, is the claim.`;
+  }
+  if (confidence === 'low') {
+    return `What would make this wrong: only ${resolved.peers} tokenized peers stand behind this multiple, and their middle half spans ${multipleWords(resolved.q1)} to ${multipleWords(resolved.q3)} of TVL. One peer re-rating moves the median, and this row with it.`;
+  }
+  if (p.change_7d !== null && p.change_7d <= -15) {
+    return `What would make this wrong: TVL fell ${Math.abs(p.change_7d).toFixed(1)}% in seven days. The value is priced on today's TVL; if the outflow continues, the base the multiple is applied to shrinks first.`;
+  }
+  if (age === null) {
+    return `What would make this wrong: no listing date is recorded for it, so its age — priced here from a one-year default — is the least-checked input on the row. A much younger protocol would deserve a lower longevity factor.`;
+  }
+  if (age < 180) {
+    return `What would make this wrong: it has been tracked for only ${age} days. The longevity factor already sits near its floor, but young protocols also fail young, and a short record cannot show how it behaves in a drawdown.`;
+  }
+  return `What would make this wrong: the peer median itself. This row is priced like the median tokenized protocol in ${resolved.group}; if that group de-rates, this row de-rates with it, whatever its own TVL does.`;
+}
+
 /**
  * The protocols the board ranks, strongest first, with ranks 1..n: every watchlist slug, plus every
  * other rankable pre-token protocol in the snapshot — the early finds below the floor are the
@@ -496,9 +847,10 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of snapshot.protocols) {
     if (!chosen.has(p.slug) && isRankable(p)) chosen.set(p.slug, p);
   }
-  const { multipleFor, globalMultiple, globalQ1, globalQ3 } = buildComps(snapshot, model);
+  const { multipleFor, globalMultiple, globalQ1, globalQ3, pools } = buildComps(snapshot, model);
   const peerCount = snapshot.protocols.filter((p) => p.mcap_usd !== null && p.tvl_usd > 0 && p.mcap_usd / p.tvl_usd > 0).length;
   const globalStats = { multiple: globalMultiple, q1: globalQ1, q3: globalQ3, peers: peerCount };
+  const fit = regressionFromSums(regressionSums(pools));
   // Where an implied value would sit among the market caps that actually trade today.
   const liveMcaps = snapshot.protocols
     .filter((p) => p.mcap_usd !== null)
@@ -527,9 +879,11 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     const sorted = [...list].sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1));
     sorted.forEach((p, i) => catRank.set(p.slug, { rank: i + 1, count: sorted.length }));
   }
+  const bands = calibrationBands(snapshot, pools, model);
   const scored = [...chosen.values()].map((p) => {
-    const v = impliedValue(p, snapshot.as_of, model, multipleFor, globalStats);
-    return { p, ...v };
+    const v = impliedValue(p, snapshot.as_of, model, multipleFor, globalStats, regressionBase(fit, p.tvl_usd));
+    const w = widenRange(v, bands);
+    return { p, ...v, low: w.low, high: w.high };
   });
   scored.sort((a, b) => b.implied - a.implied || b.p.tvl_usd - a.p.tvl_usd || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored.map((s, i) => {
@@ -554,6 +908,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       implied_high_usd: s.high,
       live_rank: liveRankOf(s.implied),
       thesis: thesisFor(s.p, s.age, standing.rank, standing.count, watchlist.has(s.p.slug)),
+      risk_note: riskNoteFor(s.p, s.resolved, s.confidence, s.compsValue, s.regressionValue, s.age),
+      float_value_usd: Math.max(1, Math.round(s.implied * INITIAL_FLOAT)),
       model: {
         category_multiple: round4(s.resolved.multiple),
         comp_peers: s.resolved.peers,
@@ -566,6 +922,9 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
         momentum_factor: round4(s.momentumFactor),
         longevity_factor: round4(s.longevityFactor),
         age_days: s.age,
+        comps_value_usd: s.compsValue,
+        regression_value_usd: s.regressionValue,
+        blend_weight: s.blendWeight,
       },
       farm_steps: farmSteps(s.p, s.age).map(stepText),
     };
@@ -806,6 +1165,8 @@ export function radarRow(row: BoardRow): RadarRow {
     implied_high_usd: row.implied_high_usd,
     live_rank: row.live_rank,
     thesis: row.thesis,
+    risk_note: row.risk_note,
+    float_value_usd: row.float_value_usd,
     category_multiple: row.model.category_multiple,
     comp_peers: row.model.comp_peers,
     multiple_source: row.model.multiple_source,
@@ -813,6 +1174,9 @@ export function radarRow(row: BoardRow): RadarRow {
     confidence: row.model.confidence,
     momentum_factor: row.model.momentum_factor,
     longevity_factor: row.model.longevity_factor,
+    comps_value_usd: row.model.comps_value_usd,
+    regression_value_usd: row.model.regression_value_usd,
+    blend_weight: row.model.blend_weight,
     farm_steps: row.farm_steps,
   };
 }
@@ -821,7 +1185,8 @@ export function radarRow(row: BoardRow): RadarRow {
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
-  const { comps, families, globalMultiple, globalQ1, globalQ3 } = buildComps(snapshot, model);
+  const { comps, families, globalMultiple, globalQ1, globalQ3, pools } = buildComps(snapshot, model);
+  const fit = regressionFromSums(regressionSums(pools));
   const early = board.filter((r) => !r.watchlist).length;
   const radar: RadarData = {
     as_of: snapshot.as_of,
@@ -832,6 +1197,9 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     global_multiple: round4(globalMultiple),
     global_q1: round4(globalQ1),
     global_q3: round4(globalQ3),
+    regression: { slope: round4(fit.slope), intercept: round4(fit.intercept), n: fit.n, r2: round4(fit.r2) },
+    backtest: backtestModel(snapshot, pools, model),
+    initial_float: INITIAL_FLOAT,
     live_total: snapshot.protocols.filter((p) => p.mcap_usd !== null).length,
     comps,
     families,

@@ -59,7 +59,7 @@ h3 { font-size: 14px; margin: 0 0 6px; }
   background: #0a0f0b; border: 1px solid var(--line-soft); border-left: 3px solid var(--phosphor);
   border-radius: 8px; padding: 12px 14px; margin: 14px 0 16px; overflow-x: auto; white-space: nowrap;
 }
-.factors { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.factors { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
 .factors article { background: rgba(255, 255, 255, 0.02); border: 1px solid var(--line-soft); border-radius: 10px; padding: 13px 15px; }
 .factors h3 { color: var(--phosphor); }
 .factors p { margin: 0; color: var(--muted); font-size: 13.5px; }
@@ -124,6 +124,7 @@ input[type="search"]:focus, select:focus { outline: 2px solid rgba(74, 222, 128,
 .arith { font-family: var(--mono); font-size: 13.5px; background: #0a0f0b; border: 1px solid var(--line-soft); border-radius: 8px; padding: 12px 14px; line-height: 1.9; overflow-x: auto; }
 .arith .res { color: var(--phosphor); font-weight: 700; }
 .thesis { margin: 12px 0 0; font-size: 15.5px; line-height: 1.55; color: var(--ink); border-left: 3px solid var(--amber); padding: 4px 0 4px 14px; max-width: 78ch; }
+.risk-note { margin: 14px 0 0; font-size: 13.5px; line-height: 1.55; color: var(--muted); border-left: 3px solid var(--red); padding: 4px 0 4px 14px; }
 .conf-line { font-size: 13.5px; color: var(--muted); margin: 12px 0 0; }
 .conf-line .conf { font-weight: 700; }
 .range-head { margin: 16px 0 4px; font-size: 13px; color: var(--ink); }

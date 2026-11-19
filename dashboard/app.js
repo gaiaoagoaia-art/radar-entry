@@ -51,13 +51,19 @@
     '<div><dt>On the board</dt><dd>' + DATA.board_size + '</dd></div>' +
     '<div><dt>Watchlist covered</dt><dd>' + DATA.watchlist_size + ' / ' + DATA.watchlist_size + '</dd></div>' +
     '<div><dt>Board implied value</dt><dd>' + money(totalImplied) + '</dd></div>';
-  el('model-tag').textContent = 'model ' + DATA.model_version + ' · market median ' + mult(DATA.global_multiple);
-  el('formula').textContent = 'implied value  =  TVL  ×  peer multiple (category median, else family median, else market median)  ×  momentum factor  ×  longevity factor';
+  el('model-tag').textContent = 'model ' + DATA.model_version + ' · market median ' + mult(DATA.global_multiple) + ' · backtest: the printed range held ' + DATA.backtest.hit_rate_pct + '% of live tokens';
+  el('formula').textContent = 'implied value  =  blend of  [ TVL × peer multiple ]  and  [ the market size curve on TVL ],  weighted by confidence,  ×  momentum factor  ×  longevity factor';
   if (DATA.comps.length > 1) {
     var hi = DATA.comps[0];
     var lo = DATA.comps[DATA.comps.length - 1];
     el('fact-comp').textContent = lo.median_multiple.toFixed(2) + '× for ' + lo.category.toLowerCase() + ' to ' + hi.median_multiple.toFixed(2) + '× for ' + hi.category.toLowerCase();
   }
+  el('fact-reg').textContent = 'over ' + DATA.regression.n + ' tokenized protocols the fit has slope ' + DATA.regression.slope.toFixed(2) +
+    ' (R² ' + DATA.regression.r2.toFixed(2) + '): value grows slower than TVL, so size alone argues for less than proportionality';
+  var bt = DATA.backtest;
+  el('fact-backtest').textContent = 'Priced backwards over the snapshot\u2019s ' + bt.n + ' live tokens, the printed range held ' + bt.hit_rate_pct +
+    '% of the time — ' + bt.grades.high.hit_rate_pct + '% of high-grade rows, ' + bt.grades.medium.hit_rate_pct + '% of medium, ' + bt.grades.low.hit_rate_pct +
+    '% of low — and the typical point estimate missed by \u00d7' + bt.median_error_factor.toFixed(1) + ', which is why every row leads with its range, not its point.';
   function compsTable(groups) {
     var html = '<thead><tr><th>Group</th><th class="num">Tokenized peers</th><th class="num">Median mcap / TVL</th><th class="num">Middle half (Q1–Q3)</th><th>Largest peers behind it</th></tr></thead><tbody>';
     groups.forEach(function (c) {
@@ -128,7 +134,7 @@
         '<td class="num">' + ageText(r.age_days) + '</td>' +
         '<td class="num implied">' + money(r.implied_value_usd) +
         '<span class="range">' + money(r.implied_low_usd) + ' – ' + money(r.implied_high_usd) + '</span>' +
-        '<span class="conf conf-' + r.confidence + '" title="' + r.confidence + ' confidence — ' + r.comp_peers + ' peers, ' + esc(r.multiple_group) + '">● ' + r.confidence + '</span></td></tr>';
+        '<span class="conf conf-' + r.confidence + '" title="' + r.confidence + ' confidence — ' + r.comp_peers + ' peers, ' + esc(r.multiple_group) + '; in the backtest, rows with this grade landed inside their printed range ' + DATA.backtest.grades[r.confidence].hit_rate_pct + '% of the time">● ' + r.confidence + '</span></td></tr>';
     });
     return html + '</tbody>';
   }
@@ -187,7 +193,6 @@
     DATA.rows.forEach(function (row) { if (row.slug === slug) r = row; });
     var node = el('detail');
     if (!r) { node.innerHTML = '<p class="empty">That protocol is not on the board.</p>'; return; }
-    var base = r.tvl_usd * r.category_multiple;
     var steps = r.farm_steps.map(function (s) { return '<li><div>' + esc(s) + '</div></li>'; }).join('');
     var srcText = r.multiple_source === 'category'
       ? 'the median of ' + r.comp_peers + ' tokenized ' + esc(r.category || '') + ' peers'
@@ -228,13 +233,16 @@
       '<dt>If it traded today</dt><dd>rank #' + r.live_rank + ' of ' + DATA.live_total + ' by market cap</dd>' +
       '</dl></div><div>' +
       '<h3>How the model prices it</h3><div class="arith">' +
-      'TVL ' + moneyFull(r.tvl_usd) + '<br>' +
-      '× peer multiple ' + mult(r.category_multiple) + ' (' + srcText + ') = ' + moneyFull(base) + '<br>' +
-      '× momentum ' + r.momentum_factor.toFixed(2) + '× · longevity ' + r.longevity_factor.toFixed(2) + '×<br>' +
-      '<span class="res">= implied value ' + moneyFull(r.implied_value_usd) + '</span></div>' +
-      '<p class="conf-line">Confidence: <span class="conf conf-' + r.confidence + '">● ' + r.confidence + '</span> — from ' + r.comp_peers + ' peers and the width of their middle half.</p>' +
-      '<h4 class="range-head">The range the peers imply</h4>' + barHtml +
-      '<p class="fineprint">The point estimate uses the peers\u2019 median multiple; the range uses their first and third quartiles with the same momentum and longevity factors. If ' + esc(r.name) + ' issued a token the market priced like those peers, this is the band the model would expect. It says nothing about whether or when a token comes.</p>' +
+      'Leg 1 · comparables: TVL ' + moneyFull(r.tvl_usd) + ' × peer multiple ' + mult(r.category_multiple) + '<br>' +
+      '&nbsp;&nbsp;(' + srcText + ')<br>' +
+      '&nbsp;&nbsp;× momentum ' + r.momentum_factor.toFixed(2) + '× · longevity ' + r.longevity_factor.toFixed(2) + '× = ' + moneyFull(r.comps_value_usd) + '<br>' +
+      'Leg 2 · size curve: the market\u2019s fit on TVL alone, same factors = ' + moneyFull(r.regression_value_usd) + '<br>' +
+      '<span class="res">Blend, ' + Math.round(r.blend_weight * 100) + '% leg 1 / ' + Math.round((1 - r.blend_weight) * 100) + '% leg 2 = implied value ' + moneyFull(r.implied_value_usd) + '</span></div>' +
+      '<p class="conf-line">Confidence: <span class="conf conf-' + r.confidence + '">● ' + r.confidence + '</span> — from ' + r.comp_peers + ' peers and the width of their middle half. In the backtest, rows with this grade landed inside their printed range ' + DATA.backtest.grades[r.confidence].hit_rate_pct + '% of the time (' + DATA.backtest.grades[r.confidence].n + ' live tokens priced as if pre-token).</p>' +
+      '<h4 class="range-head">The range the evidence supports</h4>' + barHtml +
+      '<p class="fineprint">The range spans the peers\u2019 middle half, the size curve\u2019s estimate, and this grade\u2019s calibrated band from the backtest — the middle half of what rows with this grade actually did. If ' + esc(r.name) + ' issued a token the market priced like those peers, this is the band the model would expect. It says nothing about whether or when a token comes.</p>' +
+      '<p class="risk-note">' + esc(r.risk_note) + '</p>' +
+      '<p class="fineprint">At a typical launch\u2019s float — about ' + Math.round(DATA.initial_float * 100) + '% of supply trading on day one, the rest locked behind team and investor vesting cliffs — roughly ' + moneyFull(r.float_value_usd) + ' of this value would change hands at first. The implied value prices the whole token, fully diluted; the float is what a farmer would actually meet on the market, and the cliffs ahead of it are the overhang every new token carries.</p>' +
       '</div></div>' + peersHtml +
       '<h3 style="margin-top:20px">The farm plan — ' + r.farm_steps.length + ' steps</h3>' +
       '<ol class="steps">' + steps + '</ol>';
